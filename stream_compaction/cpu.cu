@@ -20,6 +20,12 @@ namespace StreamCompaction {
         void scan(int n, int *odata, const int *idata) {
             timer().startCpuTimer();
             // TODO
+            //Note, exclusive scan
+            odata[0] = 0;
+            for (int i = 1; i < n; i++)
+            {
+                odata[i] = odata[i - 1] + idata[i - 1];
+            }
             timer().endCpuTimer();
         }
 
@@ -31,8 +37,22 @@ namespace StreamCompaction {
         int compactWithoutScan(int n, int *odata, const int *idata) {
             timer().startCpuTimer();
             // TODO
+
+            //Points to the next spot for inserting into odata
+            int oDataIndex = 0;
+
+            for (int i = 0; i < n; i++)
+            {
+                if (idata[i] != 0)
+                {
+                    odata[oDataIndex] = idata[i];
+                    oDataIndex++;
+                }
+            }
+
+
             timer().endCpuTimer();
-            return -1;
+            return oDataIndex;
         }
 
         /**
@@ -43,8 +63,46 @@ namespace StreamCompaction {
         int compactWithScan(int n, int *odata, const int *idata) {
             timer().startCpuTimer();
             // TODO
+
+            //Step 1: create bool array
+            int* boolArray = new int[n] {-1};
+            for (int i = 0; i < n; i++)
+            {
+                if (idata[i] == 0)
+                {
+                    boolArray[i] = 0;
+                }
+                else
+                {
+                    boolArray[i] = 1;
+                }
+            }
+            //Step 2: Scan bool array
+            //Note: not using scan since it's being timed with the same timer.
+            int* scanArray = new int[n];
+            scanArray[0] = 0;
+            for (int i = 1; i < n; i++)
+            {
+                scanArray[i] = scanArray[i - 1] + boolArray[i - 1];
+            }
+
+            //Step 3: Scatter
+            int count = 0;
+            for (int i = 0; i < n; i++)
+            {
+                if (boolArray[i] == 1)
+                {
+                    count++;
+                    odata[scanArray[i]] = idata[i];
+                }
+            }
+
+
+           
+            delete[] boolArray;
+            delete[] scanArray;
             timer().endCpuTimer();
-            return -1;
+            return count;
         }
     }
 }
