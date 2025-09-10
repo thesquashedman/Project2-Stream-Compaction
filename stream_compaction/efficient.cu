@@ -11,6 +11,22 @@ namespace StreamCompaction {
             static PerformanceTimer timer;
             return timer;
         }
+        
+        __global__ void UpSweep(int n, int* data, int stride)
+        {
+            int index = threadIdx.x + blockDim.x * blockIdx.x;
+            if (index < n)
+            {
+                //Pavel TODO: devise method so that I don't have to create threads equal to the number of elements
+                if (index + 1 % (int)pow(2, stride + 2) == 0)
+                {
+                    data[index] += data[index - (stride + 1)];
+                }
+            }
+        }
+        __global__ void DownScan(int n, int* data, int stride)
+        {
+        }
 
         /**
          * Performs prefix-sum (aka scan) on idata, storing the result into odata.
