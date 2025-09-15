@@ -21,9 +21,9 @@ namespace StreamCompaction {
             int index = threadIdx.x + blockDim.x * blockIdx.x;
             if (index < n)
             {
-                if (index >= pow(2, stride))
+                if (index >= powf(2, stride))
                 {
-                    odata[index] = idata[index] + idata[index - (int)pow(2, stride)];
+                    odata[index] = idata[index] + idata[index - (int)powf(2, stride)];
                 }
                 else
                 {

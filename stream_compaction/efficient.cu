@@ -12,20 +12,42 @@ namespace StreamCompaction {
             return timer;
         }
         
-        __global__ void UpSweep(int n, int* data, int stride)
+        __device__ void UpSweep(int index, int* data, int iLogCeil)
         {
-            int index = threadIdx.x + blockDim.x * blockIdx.x;
-            if (index < n)
+            
+            for (int d = 0; d < iLogCeil; d++)
             {
-                //Pavel TODO: devise method so that I don't have to create threads equal to the number of elements
-                if (index + 1 % (int)pow(2, stride + 2) == 0)
+                if ((index + 1) % (int)powf(2, d + 1))
                 {
-                    data[index] += data[index - (stride + 1)];
+                    data[index] += data[index - (int)powf(2, d)];
                 }
+                cudaDeviceSynchronize();
             }
+            
         }
-        __global__ void DownScan(int n, int* data, int stride)
+        __device__ void DownSweep(int n, int index, int* data, int iLogCeil)
         {
+            if (index == n - 1)
+            {
+                data[index] = 0;
+            }
+            
+            for (int d = iLogCeil; d >= 0; d--)
+            {
+                if ((index + 1) % (int)powf(2, d + 1))
+                {
+                    int t = data[index + (int)powf(2, d) - 1];
+                    data[index + (int)powf(2, d) - 1] = data[index + (int)powf(2, d + 1)];
+                    data[index + (int)powf(2, d + 1)] += t;
+                }
+                cudaDeviceSynchronize();
+            }
+
+        }
+
+        __global__ void kernEfficientSwap(int n, int* odata, const int* idata)
+        {
+
         }
 
         /**
