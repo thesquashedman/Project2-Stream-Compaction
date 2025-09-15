@@ -16,7 +16,7 @@ namespace StreamCompaction {
 
         // TODO: __global__
 
-        __global__ void naiveScan(int n, int* odata, const int* idata, int stride)
+        __global__ void kernNaiveScan(int n, int* odata, const int* idata, int stride)
         {
             int index = threadIdx.x + blockDim.x * blockIdx.x;
             if (index < n)
@@ -32,7 +32,7 @@ namespace StreamCompaction {
             }
         }
 
-        __global__ void inclusiveToExclusive(int n, int* odata, const int* idata)
+        __global__ void kernInclusiveToExclusive(int n, int* odata, const int* idata)
         {
             int index = threadIdx.x + blockDim.x * blockIdx.x;
             if (index == 0)
@@ -50,7 +50,7 @@ namespace StreamCompaction {
          * Performs prefix-sum (aka scan) on idata, storing the result into odata.
          */
         void scan(int n, int *odata, const int *idata) {
-            timer().startGpuTimer();
+            
             // TODO
             //Starting Input
             int *dev_arrA;
@@ -67,14 +67,16 @@ namespace StreamCompaction {
             dim3 totalBlocks ((n + threadsPerBlock - 1) / threadsPerBlock);
 
             int log2Ceil = ilog2ceil(n);
+
+            timer().startGpuTimer();
             for (int i = 0; i < log2Ceil; i++)
             {
-                naiveScan << <totalBlocks, threadsPerBlock >> > (n, dev_arrB, dev_arrA, i);
+                kernNaiveScan << <totalBlocks, threadsPerBlock >> > (n, dev_arrB, dev_arrA, i);
                 std::swap(dev_arrA, dev_arrB);
             }
             
-            inclusiveToExclusive <<<totalBlocks, threadsPerBlock >>> (n, dev_arrB, dev_arrA);
-            
+            kernInclusiveToExclusive <<<totalBlocks, threadsPerBlock >>> (n, dev_arrB, dev_arrA);
+            timer().endGpuTimer();
 
             cudaMemcpy(odata, dev_arrB, sizeof(int) * n, cudaMemcpyDeviceToHost);
             
@@ -83,7 +85,7 @@ namespace StreamCompaction {
             cudaFree(dev_arrA);
             cudaFree(dev_arrB);
 
-            timer().endGpuTimer();
+            
         }
     }
 }
