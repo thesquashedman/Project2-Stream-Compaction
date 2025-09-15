@@ -45,7 +45,7 @@ namespace StreamCompaction {
 
         }
 
-        __global__ void kernEfficientSwap(int n, int* odata, const int* idata)
+        __global__ void kernEfficientSwap(int n, int* data)
         {
 
         }
@@ -56,6 +56,12 @@ namespace StreamCompaction {
         void scan(int n, int *odata, const int *idata) {
             timer().startGpuTimer();
             // TODO
+            int* dev_arr;
+
+            int log2Ceil = ilog2ceil(n);
+            int arraySize = powf(2, n);
+
+            cudaMalloc((void**)&dev_arr, sizeof(int) * n);
             timer().endGpuTimer();
         }
 
