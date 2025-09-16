@@ -12,27 +12,24 @@ namespace StreamCompaction {
             return timer;
         }
         
-        __device__ void UpSweep(int index, int* data, int iLogCeil)
+        __device__ void upSweep(int index, int* data, int log2Ceil)
         {
             
-            for (int d = 0; d < iLogCeil; d++)
+            for (int d = 0; d < log2Ceil; d++)
             {
                 if ((index + 1) % (int)powf(2, d + 1))
                 {
                     data[index] += data[index - (int)powf(2, d)];
                 }
-                cudaDeviceSynchronize();
+                __syncthreads();
             }
             
         }
-        __device__ void DownSweep(int n, int index, int* data, int iLogCeil)
+        __device__ void downSweep(int index, int* data, int log2Ceil)
         {
-            if (index == n - 1)
-            {
-                data[index] = 0;
-            }
             
-            for (int d = iLogCeil; d >= 0; d--)
+            
+            for (int d = log2Ceil; d >= 0; d--)
             {
                 if ((index + 1) % (int)powf(2, d + 1))
                 {
@@ -40,29 +37,55 @@ namespace StreamCompaction {
                     data[index + (int)powf(2, d) - 1] = data[index + (int)powf(2, d + 1)];
                     data[index + (int)powf(2, d + 1)] += t;
                 }
-                cudaDeviceSynchronize();
+                __syncthreads();
             }
 
         }
 
-        __global__ void kernEfficientSwap(int n, int* data)
+        __global__ void kernEfficientScan(int n, int* data, int log2Ceil)
         {
-
+            int index = threadIdx.x + blockDim.x * blockIdx.x;
+            if (index < n)
+            {
+                
+                upSweep(index, data, log2Ceil);
+                if (index == n - 1)
+                {
+                    data[index] = 0;
+                }
+                downSweep(index, data, log2Ceil);
+            }
         }
 
         /**
          * Performs prefix-sum (aka scan) on idata, storing the result into odata.
          */
         void scan(int n, int *odata, const int *idata) {
-            timer().startGpuTimer();
+           
             // TODO
             int* dev_arr;
 
             int log2Ceil = ilog2ceil(n);
-            int arraySize = powf(2, n);
+            int arraySize = powf(2, log2Ceil);
 
-            cudaMalloc((void**)&dev_arr, sizeof(int) * n);
+            cudaMalloc((void**)&dev_arr, sizeof(int) * arraySize);
+            //Make sure that the array is filled with 0s to start with
+            cudaMemset(dev_arr, 0, sizeof(int) * arraySize);
+            cudaMemcpy(dev_arr, idata, sizeof(int) * arraySize, cudaMemcpyHostToDevice);
+
+            int threadsPerBlock = 128;
+            dim3 totalBlocks((arraySize + threadsPerBlock - 1) / threadsPerBlock);
+
+            timer().startGpuTimer();
+
+            kernEfficientScan << <totalBlocks, threadsPerBlock >> > (arraySize, dev_arr, log2Ceil);
+
             timer().endGpuTimer();
+
+            cudaMemcpy(odata, dev_arr, sizeof(int) * n, cudaMemcpyDeviceToHost);
+            cudaFree(dev_arr);
+
+            
         }
 
         /**
