@@ -12,50 +12,75 @@ namespace StreamCompaction {
             return timer;
         }
         
-        __device__ void upSweep(int index, int* data, int log2Ceil)
-        {
-            
-            for (int d = 0; d < log2Ceil; d++)
-            {
-                if ((index + 1) % (int)powf(2, d + 1))
-                {
-                    data[index] += data[index - (int)powf(2, d)];
-                }
-                __syncthreads();
-            }
-            
-        }
-        __device__ void downSweep(int index, int* data, int log2Ceil)
-        {
-            
-            
-            for (int d = log2Ceil; d >= 0; d--)
-            {
-                if ((index + 1) % (int)powf(2, d + 1))
-                {
-                    int t = data[index + (int)powf(2, d) - 1];
-                    data[index + (int)powf(2, d) - 1] = data[index + (int)powf(2, d + 1)];
-                    data[index + (int)powf(2, d + 1)] += t;
-                }
-                __syncthreads();
-            }
-
-        }
-
-        __global__ void kernEfficientScan(int n, int* data, int log2Ceil)
+        __global__ void kernUpSweep(int n, int* data, int d)
         {
             int index = threadIdx.x + blockDim.x * blockIdx.x;
             if (index < n)
             {
-                
-                upSweep(index, data, log2Ceil);
-                if (index == n - 1)
+                //Back when d was 0, 1, 2, 3...
+                /*
+                if (index % (int)powf(2, d + 1) == 0)
                 {
-                    data[index] = 0;
+                    data[index + (int)powf(2, d + 1) - 1] += data[index + (int)powf(2, d) - 1];
+
                 }
-                downSweep(index, data, log2Ceil);
+                */
+                if (index % (d * 2) == 0)
+                {
+                    data[index + d * 2 - 1] += data[index + d - 1];
+
+                }
+                
             }
         }
+        __global__ void kernDownSweep(int n, int* data, int d)
+        {
+            int index = threadIdx.x + blockDim.x * blockIdx.x;
+            if (index < n)
+            {
+                //Back when d was 0, 1, 2, 3...
+                /*
+                if (index  % (int)powf(2, d + 1) == 0)
+                {
+                    int t = data[index + (int)powf(2, d) - 1];
+                    data[index + (int)powf(2, d) - 1] = data[index + (int)powf(2, d + 1) - 1];
+                    data[index + (int)powf(2, d + 1) - 1] += t;
+                }
+                */
+                if (index % (d * 2) == 0)
+                {
+                    int t = data[index + d - 1];
+                    data[index + d - 1] = data[index + d * 2 - 1];
+                    data[index + d * 2 - 1] += t;
+                }
+            }
+
+        }
+
+        __global__ void kernMapToBoolean(int n, int* oData, const int* iData)
+        {
+            int index = threadIdx.x + blockDim.x * blockIdx.x;
+            if (index < n)
+            {
+                int val = iData[index];
+                if (val == 0)
+                {
+                    oData[index] = 0;
+                }
+            }
+        }
+        __global__ void kernScatter(int n, int* oData, const int* iData, const int* boolArray, const int* scannedArray)
+        {
+            int index = threadIdx.x + blockDim.x * blockIdx.x;
+            if (index < n)
+            {
+                if (boolArray[index])
+                {
+                    oData[scannedArray[index]] = iData[index];
+                }
+            }
+        }
+
 
         /**
          * Performs prefix-sum (aka scan) on idata, storing the result into odata.
@@ -63,28 +88,48 @@ namespace StreamCompaction {
         void scan(int n, int *odata, const int *idata) {
            
             // TODO
+            
             int* dev_arr;
 
             int log2Ceil = ilog2ceil(n);
-            int arraySize = powf(2, log2Ceil);
+            int arraySize = 1 << log2Ceil;
+            printf("%d\n", arraySize);
 
             cudaMalloc((void**)&dev_arr, sizeof(int) * arraySize);
+            checkCUDAError("Bad Malloc");
+           
             //Make sure that the array is filled with 0s to start with
             cudaMemset(dev_arr, 0, sizeof(int) * arraySize);
+            checkCUDAError("Bad memset");
             cudaMemcpy(dev_arr, idata, sizeof(int) * arraySize, cudaMemcpyHostToDevice);
-
+            checkCUDAError("Bad copy of initial data");
+            
             int threadsPerBlock = 128;
             dim3 totalBlocks((arraySize + threadsPerBlock - 1) / threadsPerBlock);
 
             timer().startGpuTimer();
+            for (int d = 1; d < arraySize; d *= 2)
+            {
+                kernUpSweep << <totalBlocks, threadsPerBlock >> > (arraySize, dev_arr, d);
+                checkCUDAError("up sweep failure");
+            }
+            cudaMemset(dev_arr + (arraySize - 1), 0, sizeof(int));
+            checkCUDAError("Bad zeroing of last element");
 
-            kernEfficientScan << <totalBlocks, threadsPerBlock >> > (arraySize, dev_arr, log2Ceil);
+            for (int d = arraySize / 2; d > 0; d /= 2)
+            {
+                kernDownSweep << <totalBlocks, threadsPerBlock >> > (arraySize, dev_arr, d);
+                checkCUDAError("down sweep failure");
+            }
 
+            cudaDeviceSynchronize();
             timer().endGpuTimer();
-
+            
             cudaMemcpy(odata, dev_arr, sizeof(int) * n, cudaMemcpyDeviceToHost);
+            checkCUDAError("memcpy output failure");
+            
             cudaFree(dev_arr);
-
+            cudaDeviceSynchronize();
             
         }
 
@@ -98,9 +143,41 @@ namespace StreamCompaction {
          * @returns      The number of elements remaining after compaction.
          */
         int compact(int n, int *odata, const int *idata) {
+
+
+            int* dev_in;
+            int* dev_out;
+            int* dev_boolArray;
+            int* dev_scannedArray;
+
+            cudaMalloc((void**)&dev_in, sizeof(int) * n);
+            cudaMalloc((void**)&dev_boolArray, sizeof(int) * n);
+            cudaMalloc((void**)&dev_scannedArray, sizeof(int) * n);
+            cudaMalloc((void**)&dev_out, sizeof(int) * n);
+
+            cudaMemcpy(dev_in, idata, sizeof(int) * n, cudaMemcpyHostToDevice);
+
+            int threadsPerBlock = 128;
+            dim3 totalBlocks((n + threadsPerBlock - 1) / threadsPerBlock);
+
             timer().startGpuTimer();
-            // TODO
+            kernMapToBoolean << <totalBlocks, threadsPerBlock >> > (n, dev_boolArray, dev_in);
+            scan(n, dev_scannedArray, dev_boolArray);
+
+            
+
+            //int* count = 0;
+            //cudaMemcpy(count, dev_scannedArray + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
+
+            kernScatter << <totalBlocks, threadsPerBlock >> > (n, dev_out, dev_in, dev_boolArray, dev_scannedArray);
             timer().endGpuTimer();
+            cudaMemcpy(odata, dev_out, sizeof(int) * n, cudaMemcpyDeviceToHost);
+
+            cudaFree(dev_in);
+            cudaFree(dev_out);
+            cudaFree(dev_boolArray);
+            cudaFree(dev_scannedArray);
+            
             return -1;
         }
     }
