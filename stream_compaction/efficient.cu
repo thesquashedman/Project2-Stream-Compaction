@@ -57,6 +57,30 @@ namespace StreamCompaction {
 
         }
 
+        __global__ void kernMapToBoolean(int n, int* oData, const int* iData)
+        {
+            int index = threadIdx.x + blockDim.x * blockIdx.x;
+            if (index < n)
+            {
+                int val = iData[index];
+                if (val == 0)
+                {
+                    oData[index] = 0;
+                }
+            }
+        }
+        __global__ void kernScatter(int n, int* oData, const int* iData, const int* boolArray, const int* scannedArray)
+        {
+            int index = threadIdx.x + blockDim.x * blockIdx.x;
+            if (index < n)
+            {
+                if (boolArray[index])
+                {
+                    oData[scannedArray[index]]
+                }
+            }
+        }
+
 
         /**
          * Performs prefix-sum (aka scan) on idata, storing the result into odata.

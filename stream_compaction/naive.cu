@@ -64,7 +64,7 @@ namespace StreamCompaction {
             cudaMemcpy(dev_arrA, idata, sizeof(int) * n, cudaMemcpyHostToDevice);
             
 
-            int threadsPerBlock = 256;
+            int threadsPerBlock = 128;
             dim3 totalBlocks ((n + threadsPerBlock - 1) / threadsPerBlock);
 
             int log2Ceil = ilog2ceil(n);
