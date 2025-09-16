@@ -21,9 +21,10 @@ namespace StreamCompaction {
             int index = threadIdx.x + blockDim.x * blockIdx.x;
             if (index < n)
             {
-                if (index >= powf(2, stride))
+
+                if (index >= (1 << stride))
                 {
-                    odata[index] = idata[index] + idata[index - (int)powf(2, stride)];
+                    odata[index] = idata[index] + idata[index - (1 << stride)];
                 }
                 else
                 {
@@ -63,7 +64,7 @@ namespace StreamCompaction {
             cudaMemcpy(dev_arrA, idata, sizeof(int) * n, cudaMemcpyHostToDevice);
             
 
-            int threadsPerBlock = 128;
+            int threadsPerBlock = 256;
             dim3 totalBlocks ((n + threadsPerBlock - 1) / threadsPerBlock);
 
             int log2Ceil = ilog2ceil(n);
