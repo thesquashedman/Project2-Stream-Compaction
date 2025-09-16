@@ -76,7 +76,7 @@ namespace StreamCompaction {
             {
                 if (boolArray[index])
                 {
-                    oData[scannedArray[index]]
+                    oData[scannedArray[index]] = iData[index];
                 }
             }
         }
@@ -143,9 +143,41 @@ namespace StreamCompaction {
          * @returns      The number of elements remaining after compaction.
          */
         int compact(int n, int *odata, const int *idata) {
+
+
+            int* dev_in;
+            int* dev_out;
+            int* dev_boolArray;
+            int* dev_scannedArray;
+
+            cudaMalloc((void**)&dev_in, sizeof(int) * n);
+            cudaMalloc((void**)&dev_boolArray, sizeof(int) * n);
+            cudaMalloc((void**)&dev_scannedArray, sizeof(int) * n);
+            cudaMalloc((void**)&dev_out, sizeof(int) * n);
+
+            cudaMemcpy(dev_in, idata, sizeof(int) * n, cudaMemcpyHostToDevice);
+
+            int threadsPerBlock = 128;
+            dim3 totalBlocks((n + threadsPerBlock - 1) / threadsPerBlock);
+
             timer().startGpuTimer();
-            // TODO
+            kernMapToBoolean << <totalBlocks, threadsPerBlock >> > (n, dev_boolArray, dev_in);
+            scan(n, dev_scannedArray, dev_boolArray);
+
+            
+
+            //int* count = 0;
+            //cudaMemcpy(count, dev_scannedArray + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
+
+            kernScatter << <totalBlocks, threadsPerBlock >> > (n, dev_out, dev_in, dev_boolArray, dev_scannedArray);
             timer().endGpuTimer();
+            cudaMemcpy(odata, dev_out, sizeof(int) * n, cudaMemcpyDeviceToHost);
+
+            cudaFree(dev_in);
+            cudaFree(dev_out);
+            cudaFree(dev_boolArray);
+            cudaFree(dev_scannedArray);
+            
             return -1;
         }
     }
