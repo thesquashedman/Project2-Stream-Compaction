@@ -119,15 +119,15 @@ namespace StreamCompaction {
             for (int d = 1; d < arraySize; d *= 2)
             {
                 kernUpSweep << <totalBlocks, threadsPerBlock >> > (arraySize, dev_arr, d);
-                checkCUDAError("up sweep failure");
+                //checkCUDAError("up sweep failure");
             }
             cudaMemset(dev_arr + (arraySize - 1), 0, sizeof(int));
-            checkCUDAError("Bad zeroing of last element");
+            //checkCUDAError("Bad zeroing of last element");
 
             for (int d = arraySize / 2; d > 0; d /= 2)
             {
                 kernDownSweep << <totalBlocks, threadsPerBlock >> > (arraySize, dev_arr, d);
-                checkCUDAError("down sweep failure");
+                //checkCUDAError("down sweep failure");
             }
 
             cudaDeviceSynchronize();
