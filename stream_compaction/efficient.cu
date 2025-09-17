@@ -63,9 +63,9 @@ namespace StreamCompaction {
             if (index < n)
             {
                 int val = iData[index];
-                if (val == 0)
+                if (val != 0)
                 {
-                    oData[index] = 0;
+                    oData[index] = 1;
                 }
             }
         }
@@ -85,7 +85,7 @@ namespace StreamCompaction {
         /**
          * Performs prefix-sum (aka scan) on idata, storing the result into odata.
          */
-        void scan(int n, int *odata, const int *idata) {
+        void scan(int n, int *odata, const int *idata, bool forCompact) {
            
             // TODO
             
@@ -93,7 +93,6 @@ namespace StreamCompaction {
 
             int log2Ceil = ilog2ceil(n);
             int arraySize = 1 << log2Ceil;
-            printf("%d\n", arraySize);
 
             cudaMalloc((void**)&dev_arr, sizeof(int) * arraySize);
             checkCUDAError("Bad Malloc");
@@ -101,13 +100,22 @@ namespace StreamCompaction {
             //Make sure that the array is filled with 0s to start with
             cudaMemset(dev_arr, 0, sizeof(int) * arraySize);
             checkCUDAError("Bad memset");
-            cudaMemcpy(dev_arr, idata, sizeof(int) * arraySize, cudaMemcpyHostToDevice);
+            if (!forCompact)
+            {
+                cudaMemcpy(dev_arr, idata, sizeof(int) * n, cudaMemcpyHostToDevice);
+            }
+            else
+            {
+                cudaMemcpy(dev_arr, idata, sizeof(int) * n, cudaMemcpyDeviceToDevice);
+            }
             checkCUDAError("Bad copy of initial data");
             
             int threadsPerBlock = 128;
             dim3 totalBlocks((arraySize + threadsPerBlock - 1) / threadsPerBlock);
-
-            timer().startGpuTimer();
+            if (!forCompact)
+            {
+                timer().startGpuTimer();
+            }
             for (int d = 1; d < arraySize; d *= 2)
             {
                 kernUpSweep << <totalBlocks, threadsPerBlock >> > (arraySize, dev_arr, d);
@@ -123,10 +131,18 @@ namespace StreamCompaction {
             }
 
             cudaDeviceSynchronize();
-            timer().endGpuTimer();
-            
-            cudaMemcpy(odata, dev_arr, sizeof(int) * n, cudaMemcpyDeviceToHost);
+            if (!forCompact)
+            {
+                timer().endGpuTimer();
+                cudaMemcpy(odata, dev_arr, sizeof(int) * n, cudaMemcpyDeviceToHost);
+                
+            }
+            else
+            {
+                cudaMemcpy(odata, dev_arr, sizeof(int) * n, cudaMemcpyDeviceToDevice);
+            }
             checkCUDAError("memcpy output failure");
+            
             
             cudaFree(dev_arr);
             cudaDeviceSynchronize();
@@ -144,7 +160,7 @@ namespace StreamCompaction {
          */
         int compact(int n, int *odata, const int *idata) {
 
-
+            
             int* dev_in;
             int* dev_out;
             int* dev_boolArray;
@@ -154,20 +170,30 @@ namespace StreamCompaction {
             cudaMalloc((void**)&dev_boolArray, sizeof(int) * n);
             cudaMalloc((void**)&dev_scannedArray, sizeof(int) * n);
             cudaMalloc((void**)&dev_out, sizeof(int) * n);
+            checkCUDAError("Bad Malloc");
 
+
+            cudaMemset(dev_boolArray, 0, sizeof(int) * n);
+            checkCUDAError("Bad Memset");
             cudaMemcpy(dev_in, idata, sizeof(int) * n, cudaMemcpyHostToDevice);
+            checkCUDAError("Bad Memcpy");
 
             int threadsPerBlock = 128;
             dim3 totalBlocks((n + threadsPerBlock - 1) / threadsPerBlock);
 
             timer().startGpuTimer();
             kernMapToBoolean << <totalBlocks, threadsPerBlock >> > (n, dev_boolArray, dev_in);
-            scan(n, dev_scannedArray, dev_boolArray);
+
+
+            scan(n, dev_scannedArray, dev_boolArray, true);
 
             
 
-            //int* count = 0;
-            //cudaMemcpy(count, dev_scannedArray + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
+            int count;
+            int lastElement;
+            cudaMemcpy(&count, dev_scannedArray + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
+            cudaMemcpy(&lastElement, dev_boolArray + n - 1, sizeof(int), cudaMemcpyDeviceToHost);
+            count += lastElement;
 
             kernScatter << <totalBlocks, threadsPerBlock >> > (n, dev_out, dev_in, dev_boolArray, dev_scannedArray);
             timer().endGpuTimer();
@@ -178,7 +204,8 @@ namespace StreamCompaction {
             cudaFree(dev_boolArray);
             cudaFree(dev_scannedArray);
             
-            return -1;
+            
+            return count;
         }
     }
 }
